@@ -54,7 +54,8 @@ FILELIST = "files.json"
 
 PACKAGE_TEMPLATE = "package_template.json"
 
-STAGING_BASE = "/cifs/eaw-div/rdm_staging/naduf/"
+#STAGING_BASE = "/cifs/eaw-div/rdm_staging/naduf/"
+STAGING_BASE = "/Users/uschoene/desktop/staging"
 
 STATIONS_KML = 'naduf_stations.kml'
 
