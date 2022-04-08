@@ -20,14 +20,16 @@
 
 
 """
-Usage: upload_naduf.py [-v VERSION]
+Usage: upload_naduf.py [-t] [-v VERSION]
        upload_naduf.py -h
 
 Options:
-    -v VERSION        Version of the upload of the form YYYY-n, where n is an 
-                      incrementing index, reset to 1 when a new years starts.
-                      When omitted, the latest version found in the base of
-                      the staging directory is used.
+    --version, -v VERSION      Version of the upload of the form YYYY-n, where n is an 
+                               incrementing index, reset to 1 when a new years starts.
+                               When omitted, the latest version found in the base of
+                               the staging directory is used.
+    --test, -t                 Switches to test mode (Not documented)
+    --help, -h                 This help.
 
 """
 
@@ -68,32 +70,11 @@ PKG_BASETITLE = "NADUF - National long-term surveillance of Swiss rivers"
 HOST="https://data.eawag.ch"
 APIKEY = os.environ["CKAN_APIKEY_PROD1"]
 
-#UPLOAD_LOCATION = os.path.join(STAGING_base, 'upload')
-# YEAR = "2017"
-# TIMERANGE_START = "1974"
-# DATAFOLDER = "NADUF Daten"
-# 
-# TMP_LOCATION = os.path.join(STAGING, "tmp")
-# 
-# SOURCE_LOCATION = os.path.join(STAGING, 'sources')
-
-# PKGTITLE = "NADUF - National long-term surveillance of Swiss rivers ({})".format(YEAR)
-# PKGNAME = "naduf-national-long-term-surveillance-of-swiss-rivers-{}".format(YEAR)
-
-# DESCRIPTION = "description.txt"
-# FILELIST = "files.json"
-
-# testing
-# HOST = "http://localhost:5000"
-# APIKEY = os.environ["CKAN_APIKEY_L"]
-
-# HOST="http://eaw-ckan-prod1.eawag.wroot.emp-eaw.ch"
-
-
 class Upload:
     def __init__(self, args, staging_base):
         self.staging_base = staging_base
         self.version = self._get_version(args)
+        self.is_test = bool(args.get('--test'))
         self.staging = os.path.join(self.staging_base, self.version)
         if not os.path.isdir(self.staging):
             raise Exception('Staging directory "{}" not found'
@@ -139,7 +120,17 @@ class Upload:
     def _read_template(self):
         with open(os.path.join(self.staging, PACKAGE_TEMPLATE), 'r') as fp:
             template = json.load(fp)
+        template = self._modify_testmode(template)
         return(template)
+
+    def _modify_testmode(self, template):
+        if self.is_test:
+            # Change to test-target in repository
+            template["owner_org"] = "research-data-management"
+            template["private"] = True
+        else:
+            pass
+        return template
 
     def _get_conn(self):
         return ckanapi.RemoteCKAN(HOST, apikey=APIKEY)
@@ -199,24 +190,22 @@ class Upload:
 
     def get_coordinates(self):
         """Extracts GeoJSON for station-locations from KML"""
+        coordinates = []
         tree = ET.parse(self.stations_kml)
         root = tree.getroot()
-        ns = '{http://www.opengis.ne/kml/2.2}'
-        test = './/'+ns+'Placemark//'+ns+'coordinates'
-        coordinates = []
-        for child in  root.findall(test):
-            print('Found point!')
-            lon, lat = child.text.split(',')[0:2]
-            coordinates.append([round(float(lon), 8), round(float(lat), 8)])
+        # get namespace-url
+        ns = re.match(r'({.*}).*', root.tag).group(1)
+
+        for point in root.iter(ns + 'Point'):
+            coordinates.extend(
+                [coord.text for coord in point.findall(ns + 'coordinates')])
+        coordinates = [coord.split(',')[0:2] for coord in coordinates]
+        coordinates = [[float(c) for c in point] for point in coordinates]
         geojson = {'type': "MultiPoint",
                    'coordinates': coordinates}
-        ## FIX THIS ########################
-        geojson = {}
-        ## ##################################
         geojson = json.dumps(geojson)
-        print(geojson)
         return(geojson)
-             
+
     def create_package(self):
         pkg = self._read_template()
         pkg['timerange'] = open(
@@ -231,8 +220,6 @@ class Upload:
 
     def upload_package(self, pkg):
         print("\nUploading package ...")
-        print(pkg['spatial'])
-        print("")
         try:
             self.conn.call_action('package_create', data_dict=pkg)
         except  ckanapi.ValidationError:
